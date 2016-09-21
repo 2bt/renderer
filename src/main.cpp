@@ -19,8 +19,9 @@ template<size_t N> struct VecMembers { std::array<float,N> m; };
 template<> struct VecMembers<2> { union { std::array<float,2> m{}; struct { float x, y; }; }; };
 template<> struct VecMembers<3> { union { std::array<float,3> m{}; struct { float x, y, z; }; }; };
 template<> struct VecMembers<4> { union { std::array<float,4> m{}; struct { float x, y, z, w; }; }; };
+
 template<size_t N>
-struct Vec : public VecMembers<N> {
+struct Vec : VecMembers<N> {
 	Vec() {}
 	template<size_t M, class=std::enable_if_t<N<=M>>
 	Vec(const Vec<M>& v) {
@@ -149,11 +150,30 @@ struct Canvas {
 Matrix modelview;
 Matrix projection;
 
+bool smooth = true;
 
-Vec3 sample(SDL_Surface* s, Vec2 t) {
+Vec3 sample(SDL_Surface* s, int u, int v) {
+	Uint8* p = (Uint8*) s->pixels + v * s->pitch + u * 3;
+	return Vec3 { p[2], p[1], p[0] } * (1 / 255.0);
+}
+
+Vec3 smooth_sample(SDL_Surface* s, const Vec2& t) {
+	float uf = t.x * s->w;
+	float vf = t.y * s->h;
+	int u = floor(uf);
+	int v = floor(vf);
+	uf -= u;
+	vf -= v;
+	return	(sample(s, u, v) * (1-uf) + sample(s, u+1, v) * uf) * (1-vf) +
+			(sample(s, u, v+1) * (1-uf) + sample(s, u+1, v+1) * uf) * vf;
+}
+
+Vec3 sample(SDL_Surface* s, const Vec2& t) {
+	if (smooth) return smooth_sample(s, t);
 	Uint8* p = (Uint8*) s->pixels + (int) (t.y * s->h) * s->pitch + (int) (t.x * s->w) * 3;
 	return Vec3 { p[2], p[1], p[0] } * (1 / 255.0);
 }
+
 
 
 struct Shader {
@@ -172,6 +192,13 @@ struct Shader {
 		SDL_FreeSurface(tex_s);
 		SDL_FreeSurface(tex_n);
 	}
+
+	bool normal_mapping = true;
+	bool diffuse_mapping = true;
+	bool specular_mapping = true;
+	void toggle_normal_mapping() { normal_mapping = !normal_mapping; }
+	void toggle_diffuse_mapping() { diffuse_mapping = !diffuse_mapping; }
+	void toggle_specular_mapping() { specular_mapping = !specular_mapping; }
 
 	struct Varying {
 		Vec3 pos;
@@ -202,9 +229,7 @@ struct Shader {
 		normal = normal.normalized_fast();
 
 
-		// normal mapping
-//		if (0)
-		{
+		if (normal_mapping) {
 			Vec3 f1 = varying[1].pos - varying[0].pos;
 			Vec3 f2 = varying[2].pos - varying[0].pos;
 			Vec2 t1 = varying[1].texcoord - varying[0].texcoord;
@@ -227,21 +252,21 @@ struct Shader {
 
 
 		float diff = std::max<float>(0, normal * light) * 0.9 + 0.1;
-//		Vec3 diff_color = Vec3(0.4, 0.4, 0.6) * diff;
-		Vec3 diff_color = sample(tex_d, texcoord) * diff;
+		if (diffuse_mapping) color = sample(tex_d, texcoord) * diff;
+		else color = Vec3(0.4, 0.4, 0.6) * diff;
 
 
-		Vec3 refl = normal * (normal * light * 2) - light;
-		//float spec = powf(max(refl.z, 0.0f), 96); // slow
-		float spec = max(refl.z, 0.0f);
-		spec *= spec; spec *= spec; spec *= spec; spec *= spec; spec *= spec; spec *= spec;
-		Vec3 spec_color = sample(tex_s, texcoord) * spec;
+		if (specular_mapping) {
+			Vec3 refl = normal * (normal * light * 2) - light;
+			//float spec = powf(max(refl.z, 0.0f), 96); // slow
+			float spec = max(refl.z, 0.0f);
+			spec *= spec; spec *= spec; spec *= spec; spec *= spec; spec *= spec; spec *= spec;
+			color = color + sample(tex_s, texcoord) * spec;
+		}
 
 
-		color = diff_color + spec_color;
 
-
-		// toony colors
+//		// toony colors
 //		color = color * 5;
 //		color.x = (int)color.x / 4.0;
 //		color.y = (int)color.y / 4.0;
@@ -426,6 +451,13 @@ int main(int argc, char** argv) {
 			switch (e.type) {
 			case SDL_QUIT:
 				running = false;
+				break;
+
+			case SDL_KEYDOWN:
+				if (e.key.keysym.scancode == SDL_SCANCODE_N) shader.toggle_normal_mapping();
+				if (e.key.keysym.scancode == SDL_SCANCODE_D) shader.toggle_diffuse_mapping();
+				if (e.key.keysym.scancode == SDL_SCANCODE_S) shader.toggle_specular_mapping();
+				if (e.key.keysym.scancode == SDL_SCANCODE_F) smooth = !smooth;
 				break;
 
 			case SDL_WINDOWEVENT:
