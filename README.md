@@ -18,6 +18,10 @@ A software renderer
         <td><code>F</code></td>
         <td>toggle smooth filter</td>
     </tr>
+    <tr>
+        <td><code>-</code> and <code>-</code></td>
+        <td>change pixel size</td>
+    </tr>
 </table>
 
 ![image](screenshot.png)
